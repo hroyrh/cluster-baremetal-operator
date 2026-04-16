@@ -242,24 +242,21 @@ func main() {
 	ctx, cancel := context.WithCancel(ctrl.SetupSignalHandler())
 	defer cancel()
 
-	// Set up the TLS security profile watcher controller when TLS adherence
-	// requires enforcement. This triggers a graceful shutdown when the TLS
-	// profile changes, so that CBO restarts with the new TLS configuration.
-	if honorTLSProfile {
-		if err := (&utiltls.SecurityProfileWatcher{
-			Client:                mgr.GetClient(),
-			InitialTLSProfileSpec: tlsProfileSpec,
-			OnProfileChange: func(ctx context.Context, oldSpec, newSpec osconfigv1.TLSProfileSpec) {
-				klog.Infof("TLS profile has changed, initiating a shutdown to reload it. %q: %+v, %q: %+v",
-					"old profile", oldSpec,
-					"new profile", newSpec,
-				)
-				cancel()
-			},
-		}).SetupWithManager(mgr); err != nil {
-			klog.ErrorS(err, "unable to create TLS security profile watcher controller")
-			os.Exit(1)
-		}
+	// Watch the APIServer CR for changes to both tlsAdherence and the TLS
+	// security profile. Always registered so that transitions in either
+	// direction (e.g. tlsAdherence "" -> "StrictAllComponents" or vice
+	// versa) trigger a graceful restart.
+	if err := (&controllers.TLSConfigWatcher{
+		Client:             mgr.GetClient(),
+		InitialProfileSpec: tlsProfileSpec,
+		InitialAdherence:   apiServer.Spec.TLSAdherence,
+		OnChange: func() {
+			klog.Info("TLS configuration has changed, initiating shutdown to reload")
+			cancel()
+		},
+	}).SetupWithManager(mgr); err != nil {
+		klog.ErrorS(err, "unable to create TLS config watcher controller")
+		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder
 
