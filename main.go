@@ -110,11 +110,16 @@ func main() {
 		os.Exit(1)
 	}
 
-	honorTLSProfile := provisioning.ShouldHonorClusterTLSProfile(apiServer.Spec.TLSAdherence)
-
 	var webhookTLSOpts []func(*tls.Config)
 	var tlsProfileSpec osconfigv1.TLSProfileSpec
-	if honorTLSProfile {
+	var tlsAdherencePolicy osconfigv1.TLSAdherencePolicy
+
+	if tlsAdherencePolicy, err = utiltls.FetchAPIServerTLSAdherencePolicy(tlsFetchCtx, k8sClient); err != nil {
+		klog.ErrorS(err, "unable to get TLS profile from APIServer")
+		os.Exit(1)
+	}
+
+	if provisioning.ShouldHonorClusterTLSProfile(tlsAdherencePolicy) {
 		tlsProfileSpec, err = utiltls.FetchAPIServerTLSProfile(tlsFetchCtx, k8sClient)
 		if err != nil {
 			klog.ErrorS(err, "unable to get TLS profile from APIServer")
@@ -246,12 +251,22 @@ func main() {
 	// security profile. Always registered so that transitions in either
 	// direction (e.g. tlsAdherence "" -> "StrictAllComponents" or vice
 	// versa) trigger a graceful restart.
-	if err := (&controllers.TLSConfigWatcher{
-		Client:             mgr.GetClient(),
-		InitialProfileSpec: tlsProfileSpec,
-		InitialAdherence:   apiServer.Spec.TLSAdherence,
-		OnChange: func() {
-			klog.Info("TLS configuration has changed, initiating shutdown to reload")
+	if err := (&utiltls.SecurityProfileWatcher{
+		Client:                    mgr.GetClient(),
+		InitialTLSProfileSpec:     tlsProfileSpec,
+		InitialTLSAdherencePolicy: tlsAdherencePolicy,
+		OnProfileChange: func(ctx context.Context, tlsProfileSpec, newTLSProfileSpec osconfigv1.TLSProfileSpec) {
+			klog.Infof("TLS profile has changed, initiating a shutdown to reload it. %q: %+v, %q: %+v",
+				"old profile", tlsProfileSpec,
+				"new profile", newTLSProfileSpec,
+			)
+			cancel()
+		},
+		OnAdherencePolicyChange: func(ctx context.Context, tlsAdherencePolicy, newTlsAdherencePolicy osconfigv1.TLSAdherencePolicy) {
+			klog.Infof("TLS adherence policy has changed, initiating a shutdown to reload it. %q: %+v, %q: %+v",
+				"old TLS Adherence policy", tlsAdherencePolicy,
+				"new TLS Adherence policy", newTlsAdherencePolicy,
+			)
 			cancel()
 		},
 	}).SetupWithManager(mgr); err != nil {

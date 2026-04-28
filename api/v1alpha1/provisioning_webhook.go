@@ -19,10 +19,8 @@ import (
 	"context"
 	"fmt"
 
-	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
 
@@ -32,16 +30,16 @@ var enabledFeatures EnabledFeatures
 
 func (r *Provisioning) SetupWebhookWithManager(mgr ctrl.Manager, features EnabledFeatures) error {
 	enabledFeatures = features
-	return ctrl.NewWebhookManagedBy(mgr).
-		For(r).
+	return ctrl.NewWebhookManagedBy(mgr, r).
+		WithValidator(r).
 		Complete()
 }
 
 // https://golangbyexample.com/go-check-if-type-implements-interface/
-var _ webhook.CustomValidator = &Provisioning{}
+var _ admission.Validator[*Provisioning] = &Provisioning{}
 
-// ValidateCreate implements webhook.CustomValidator so a webhook will be registered for the type
-func (r *Provisioning) ValidateCreate(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
+// ValidateCreate implements admission.Validator so a webhook will be registered for the type
+func (r *Provisioning) ValidateCreate(ctx context.Context, obj *Provisioning) (admission.Warnings, error) {
 	provisioninglog.Info("validate create", "name", r.Name)
 
 	if r.Name != ProvisioningSingletonName {
@@ -51,14 +49,14 @@ func (r *Provisioning) ValidateCreate(ctx context.Context, obj runtime.Object) (
 	return nil, r.ValidateBaremetalProvisioningConfig(enabledFeatures)
 }
 
-// ValidateUpdate implements webhook.Validator so a webhook will be registered for the type
-func (r *Provisioning) ValidateUpdate(ctx context.Context, oldObj, newObj runtime.Object) (admission.Warnings, error) {
+// ValidateUpdate implements admission.Validator so a webhook will be registered for the type
+func (r *Provisioning) ValidateUpdate(ctx context.Context, oldObj, newObj *Provisioning) (admission.Warnings, error) {
 	provisioninglog.Info("validate update", "name", r.Name)
 	return nil, r.ValidateBaremetalProvisioningConfig(enabledFeatures)
 }
 
-// ValidateDelete implements webhook.Validator so a webhook will be registered for the type
-func (r *Provisioning) ValidateDelete(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
+// ValidateDelete implements admission.Validator so a webhook will be registered for the type
+func (r *Provisioning) ValidateDelete(ctx context.Context, obj *Provisioning) (admission.Warnings, error) {
 	provisioninglog.Info("validate delete", "name", r.Name)
 	return nil, nil
 }
